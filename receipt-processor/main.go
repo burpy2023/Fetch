@@ -1,166 +1,198 @@
 package main
 
 import (
-    "encoding/json"
-    "log"
-    "math/rand"
-    "net/http"
-    "regexp"
-    "strconv"
-    "time"
+	"encoding/json"
+	"log"
 	"math"
-	"fmt"
+	"math/rand"
+	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
-    "github.com/gorilla/mux"
+	"time"
+
+	"github.com/gorilla/mux"
 )
 
-// The receipt structure with relevant fields
+// receipt structure
 type Receipt struct {
-    Retailer     string  `json:"retailer"`
-    PurchaseDate string  `json:"purchaseDate"`
-    PurchaseTime string  `json:"purchaseTime"`
-    Total        string  `json:"total"`
-    Items        []Item  `json:"items"`
+	Retailer     string `json:"retailer"`
+	PurchaseDate string `json:"purchaseDate"`
+	PurchaseTime string `json:"purchaseTime"`
+	Total        string `json:"total"`
+	Items        []Item `json:"items"`
 }
 
-// Items in the receipt
+// item structure
 type Item struct {
-    ShortDescription string `json:"shortDescription"`
-    Price            string `json:"price"`
+	ShortDescription string `json:"shortDescription"`
+	Price            string `json:"price"`
 }
 
-// Response for points awarded
+// PointsResponse and ReceiptIDResponse structure
 type PointsResponse struct {
-    Points int `json:"points"`
+	Points int `json:"points"`
 }
 
-// Response containing the receipt ID
 type ReceiptIDResponse struct {
-    ID string `json:"id"`
+	ID string `json:"id"`
 }
 
-// Store receipts in-memory (temporary, obviously)
+// store receipts in-memory
 var receiptStorage = make(map[string]Receipt)
 
+// regex to identify alphanumeric characters
+var alphanumericRegex = regexp.MustCompile(`[a-zA-Z0-9]`)
+
 func main() {
-    r := mux.NewRouter()
+	r := mux.NewRouter()
 
-    // Routes for processing the receipt and getting points
-    r.HandleFunc("/receipts/process", processReceiptHandler).Methods("POST")
-    r.HandleFunc("/receipts/{id}/points", getPointsHandler).Methods("GET")
+	// Route Handlers
+	r.HandleFunc("/receipts/process", processReceiptHandler).Methods("POST")
+	r.HandleFunc("/receipts/{id}/points", getPointsHandler).Methods("GET")
 
-    log.Println("Server's up! Listening on :8080...")
-    log.Fatal(http.ListenAndServe(":8080", r))
+	log.Println("Server's up! Listening on :8080...")
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
-// This function handles receipt submission and returns a receipt ID
+// handler to process receipt and store it
 func processReceiptHandler(w http.ResponseWriter, r *http.Request) {
-    var receipt Receipt
-    err := json.NewDecoder(r.Body).Decode(&receipt)
-    if err != nil {
-        http.Error(w, "Uh oh, invalid request!", http.StatusBadRequest)
-        return
-    }
+	receipt, err := decodeRequest(r)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
-    // Generate a random receipt ID
-    receiptID := generateReceiptID()
-    receiptStorage[receiptID] = receipt
-
-    response := ReceiptIDResponse{ID: receiptID}
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
+	receiptID := storeReceipt(receipt)
+	respondWithJSON(w, http.StatusOK, ReceiptIDResponse{ID: receiptID})
 }
 
-// This function handles getting points for a given receipt ID
+// handler to get points for a stored receipt
 func getPointsHandler(w http.ResponseWriter, r *http.Request) {
-    vars := mux.Vars(r)
-    id := vars["id"]
+	vars := mux.Vars(r)
+	receipt, found := getReceipt(vars["id"])
+	if !found {
+		http.Error(w, "Receipt not found", http.StatusNotFound)
+		return
+	}
 
-    // Check if the receipt exists
-    receipt, exists := receiptStorage[id]
-    if !exists {
-        http.Error(w, "Receipt not found, sorry!", http.StatusNotFound)
-        return
-    }
+	points, err := calculatePoints(receipt)
+	if err != nil {
+		http.Error(w, "Error calculating points", http.StatusInternalServerError)
+		return
+	}
 
-    // Calculate the points based on receipt data
-    points := calculatePoints(receipt)
-    response := PointsResponse{Points: points}
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
+	respondWithJSON(w, http.StatusOK, PointsResponse{Points: points})
 }
 
-// This function generates a random receipt ID
+// decode the incoming request to a Receipt object
+func decodeRequest(r *http.Request) (Receipt, error) {
+	var receipt Receipt
+	err := json.NewDecoder(r.Body).Decode(&receipt)
+	return receipt, err
+}
+
+// Store the receipt and return the generated id
+func storeReceipt(receipt Receipt) string {
+	receiptID := generateReceiptID()
+	receiptStorage[receiptID] = receipt
+	return receiptID
+}
+
+// Retrieve receipt by id
+func getReceipt(id string) (Receipt, bool) {
+	receipt, exists := receiptStorage[id]
+	return receipt, exists
+}
+
+// generte a random receipt id
 func generateReceiptID() string {
-    rand.Seed(time.Now().UnixNano())
-    letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-    id := make([]rune, 16)
-    for i := range id {
-        id[i] = letters[rand.Intn(len(letters))]
-    }
-    return string(id)
+	rand.Seed(time.Now().UnixNano())
+	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	id := make([]rune, 16)
+	for i := range id {
+		id[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(id)
 }
 
+// Helper function to respond with json
+func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(payload)
+}
 
+// main logic of point calculation with error handling
+func calculatePoints(receipt Receipt) (int, error) {
+	points := 0
 
-//////// main logic of point calculartion
+	points += calculateRetailerPoints(receipt.Retailer)
 
+	totalFloat, err := strconv.ParseFloat(receipt.Total, 64)
+	if err != nil {
+		return 0, err
+	}
 
-func calculatePoints(receipt Receipt) int {
-    points := 0
+	points += calculateTotalPoints(totalFloat)
+	points += calculateItemPoints(receipt.Items)
+	points += calculateOddDatePoints(receipt.PurchaseDate)
+	points += calculateTimePoints(receipt.PurchaseTime)
 
-    // 1 point for each alphanumeric character in the retailer name
-    re := regexp.MustCompile(`[a-zA-Z0-9]`)
-    retailerAlnumChars := re.FindAllString(receipt.Retailer, -1)
-    retailerPoints := len(retailerAlnumChars)
-    points += retailerPoints
-    fmt.Printf("Retailer points: %d (Total: %d)\n", retailerPoints, points)
+	return points, nil
+}
 
-    // 50 points if the total is a round dollar amount (like 5.00)
-    totalFloat, _ := strconv.ParseFloat(receipt.Total, 64)
-    if totalFloat == float64(int(totalFloat)) {
-        points += 50
-        fmt.Printf("Round total points: 50 (Total: %d)\n", points)
-    }
+// Calculate points based on the retailer name
+func calculateRetailerPoints(retailer string) int {
+	retailerAlnumChars := alphanumericRegex.FindAllString(retailer, -1)
+	return len(retailerAlnumChars)
+}
 
-    // 25 points if the total is a multiple of 0.25
-    if int(totalFloat*100)%25 == 0 {
-        points += 25
-        fmt.Printf("Multiple of 0.25 points: 25 (Total: %d)\n", points)
-    }
+// Calculate points based on the total amount
+func calculateTotalPoints(total float64) int {
+	points := 0
+	if total == float64(int(total)) {
+		points += 50
+	}
+	if int(total*100)%25 == 0 {
+		points += 25
+	}
+	return points
+}
 
-    // 5 points for every two items in the receipt
-    itemPairs := (len(receipt.Items) / 2) * 5
-    points += itemPairs
-    fmt.Printf("Item pairs points: %d (Total: %d)\n", itemPairs, points)
+// Calculate points based on items
+func calculateItemPoints(items []Item) int {
+	points := (len(items) / 2) * 5 // 5 points for every two items
+	for _, item := range items {
+		trimmedDescription := strings.TrimSpace(item.ShortDescription)
+		if len(trimmedDescription)%3 == 0 {
+			itemPrice, _ := strconv.ParseFloat(item.Price, 64)
+			points += int(math.Ceil(itemPrice * 0.2))
+		}
+	}
+	return points
+}
 
-    // Extra points if the trimmed item description length is a multiple of 3
-    for _, item := range receipt.Items {
-        // Properly trim the description using strings.TrimSpace
-        trimmedDescription := strings.TrimSpace(item.ShortDescription)
-        if len(trimmedDescription)%3 == 0 {
-            itemPrice, _ := strconv.ParseFloat(item.Price, 64)
-            extraItemPoints := int(math.Ceil(itemPrice * 0.2))
-            points += extraItemPoints
-            fmt.Printf("Item description '%s' points: %d (Total: %d)\n", trimmedDescription, extraItemPoints, points)
-        }
-    }
+// Calculate points based on the purchase date
+func calculateOddDatePoints(dateStr string) int {
+	purchaseDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return 0
+	}
+	if purchaseDate.Day()%2 != 0 {
+		return 6
+	}
+	return 0
+}
 
-    // 6 points if the purchase date is on an odd day
-    purchaseDate, _ := time.Parse("2006-01-02", receipt.PurchaseDate)
-    if purchaseDate.Day()%2 != 0 {
-        points += 6
-        fmt.Printf("Odd day points: 6 (Total: %d)\n", points)
-    }
-
-    // 10 points if the purchase time is between 2 PM and 4 PM
-    purchaseTime, _ := time.Parse("15:04", receipt.PurchaseTime)
-    if purchaseTime.Hour() >= 14 && purchaseTime.Hour() < 16 {
-        points += 10
-        fmt.Printf("Purchase time points: 10 (Total: %d)\n", points)
-    }
-
-    fmt.Printf("Final total points: %d\n", points)
-    return points
+// Calculate points based on the purchase time
+func calculateTimePoints(timeStr string) int {
+	purchaseTime, err := time.Parse("15:04", timeStr)
+	if err != nil {
+		return 0
+	}
+	if purchaseTime.Hour() >= 14 && purchaseTime.Hour() < 16 {
+		return 10
+	}
+	return 0
 }

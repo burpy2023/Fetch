@@ -51,7 +51,7 @@ Content-Type: application/json
 
 
 ### get the reciept points example 1
-GET {{baseUrl}}/receipts/qXQl48ds17elfWdP/points
+GET {{baseUrl}}/receipts/PIbubcnWoqBeC5bh/points
 Content-Type: application/json
 
 
@@ -85,5 +85,5 @@ Content-Type: application/json
 
 
 ### get the reciept points example 2
-GET {{baseUrl}}/receipts/xjZkIecMZ2icG6d8/points
+GET {{baseUrl}}/receipts/LYJJ7PovMQvgE3E1/points
 Content-Type: application/json
