@@ -51,7 +51,7 @@ Content-Type: application/json
 
 
 ### get the reciept points example 1
-GET {{baseUrl}}/receipts/PIbubcnWoqBeC5bh/points
+GET {{baseUrl}}/receipts/hY26VWq7zAZ4EDAz/points
 Content-Type: application/json
 
 
@@ -86,4 +86,83 @@ Content-Type: application/json
 
 ### get the reciept points example 2
 GET {{baseUrl}}/receipts/LYJJ7PovMQvgE3E1/points
+Content-Type: application/json
+
+
+### Random Test 3
+POST {{baseUrl}}/receipts/process
+Content-Type: application/json
+
+{
+  "retailer": "Walmart",
+  "purchaseDate": "2023-06-15",
+  "purchaseTime": "14:30",
+  "items": [
+    {
+      "shortDescription": "Bread",
+      "price": "2.50"
+    },
+    {
+      "shortDescription": "Peanut Butter",
+      "price": "5.75"
+    },
+    {
+      "shortDescription": "Grapes Seedless",
+      "price": "4.25"
+    },
+    {
+      "shortDescription": "Organic Honey 500g",
+      "price": "10.00"
+    }
+  ],
+  "total": "22.50"
+}
+
+
+
+### get the reciept points example 1
+GET {{baseUrl}}/receipts/uMHy1mQgoYCkzWM3/points
+Content-Type: application/json
+
+
+
+
+### Edge Case Test 
+POST {{baseUrl}}/receipts/process
+Content-Type: application/json
+
+{
+  "retailer": "7-Eleven",
+  "purchaseDate": "2024-02-29",
+  "purchaseTime": "15:59",
+  "items": [
+    {
+      "shortDescription": "Milk",
+      "price": "3.25"
+    },
+    {
+      "shortDescription": "   Eggs 12pk   ",
+      "price": "2.99"
+    },
+    {
+      "shortDescription": "Banana",
+      "price": "0.55"
+    },
+    {
+      "shortDescription": "Peanut Butter 16oz",
+      "price": "4.50"
+    },
+    {
+      "shortDescription": "Chips",
+      "price": "1.75"
+    }
+  ],
+  "total": "13.04"
+}
+
+
+
+
+### get the reciept points example 1
+GET {{baseUrl}}/receipts/ycfPbjrHb2YrYThy/points
 Content-Type: application/json

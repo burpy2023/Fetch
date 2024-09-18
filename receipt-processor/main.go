@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -39,10 +40,11 @@ type ReceiptIDResponse struct {
 }
 
 // store receipts in-memory
-var receiptStorage = make(map[string]Receipt)
-
-// regex to identify alphanumeric characters
-var alphanumericRegex = regexp.MustCompile(`[a-zA-Z0-9]`)
+var (
+	receiptStorage    = make(map[string]Receipt)
+	mu                sync.Mutex
+	alphanumericRegex = regexp.MustCompile(`[a-zA-Z0-9]`)
+)
 
 func main() {
 	r := mux.NewRouter()
@@ -78,6 +80,7 @@ func getPointsHandler(w http.ResponseWriter, r *http.Request) {
 
 	points, err := calculatePoints(receipt)
 	if err != nil {
+		log.Printf("Error calculating points: %v", err)
 		http.Error(w, "Error calculating points", http.StatusInternalServerError)
 		return
 	}
@@ -95,13 +98,17 @@ func decodeRequest(r *http.Request) (Receipt, error) {
 // Store the receipt and return the generated id
 func storeReceipt(receipt Receipt) string {
 	receiptID := generateReceiptID()
+	mu.Lock()
 	receiptStorage[receiptID] = receipt
+	mu.Unlock()
 	return receiptID
 }
 
 // Retrieve receipt by id
 func getReceipt(id string) (Receipt, bool) {
+	mu.Lock()
 	receipt, exists := receiptStorage[id]
+	mu.Unlock()
 	return receipt, exists
 }
 
@@ -127,25 +134,47 @@ func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
 func calculatePoints(receipt Receipt) (int, error) {
 	points := 0
 
-	points += calculateRetailerPoints(receipt.Retailer)
+	// Calculate points from retailer name
+	retailerPoints := calculateRetailerPoints(receipt.Retailer)
+	points += retailerPoints
+	log.Printf("Retailer points: %d (Total: %d)\n", retailerPoints, points)
 
+	// Parse the total amount
 	totalFloat, err := strconv.ParseFloat(receipt.Total, 64)
 	if err != nil {
 		return 0, err
 	}
 
-	points += calculateTotalPoints(totalFloat)
-	points += calculateItemPoints(receipt.Items)
-	points += calculateOddDatePoints(receipt.PurchaseDate)
-	points += calculateTimePoints(receipt.PurchaseTime)
+	// Calculate points from the total amount
+	totalPoints := calculateTotalPoints(totalFloat)
+	points += totalPoints
+	log.Printf("Total points: %d (Total: %d)\n", totalPoints, points)
 
+	// Calculate points from items
+	itemPoints := calculateItemPoints(receipt.Items)
+	points += itemPoints
+	log.Printf("Item points: %d (Total: %d)\n", itemPoints, points)
+
+	// Calculate points from purchase date
+	oddDatePoints := calculateOddDatePoints(receipt.PurchaseDate)
+	points += oddDatePoints
+	log.Printf("Odd date points: %d (Total: %d)\n", oddDatePoints, points)
+
+	// Calculate points from purchase time
+	timePoints := calculateTimePoints(receipt.PurchaseTime)
+	points += timePoints
+	log.Printf("Time points: %d (Total: %d)\n", timePoints, points)
+
+	log.Printf("Final total points: %d\n", points)
 	return points, nil
 }
 
 // Calculate points based on the retailer name
 func calculateRetailerPoints(retailer string) int {
 	retailerAlnumChars := alphanumericRegex.FindAllString(retailer, -1)
-	return len(retailerAlnumChars)
+	points := len(retailerAlnumChars)
+	log.Printf("Retailer name '%s' has %d alphanumeric characters\n", retailer, points)
+	return points
 }
 
 // Calculate points based on the total amount
@@ -153,9 +182,11 @@ func calculateTotalPoints(total float64) int {
 	points := 0
 	if total == float64(int(total)) {
 		points += 50
+		log.Printf("Total amount is a round dollar amount, added 50 points\n")
 	}
 	if int(total*100)%25 == 0 {
 		points += 25
+		log.Printf("Total amount is a multiple of 0.25, added 25 points\n")
 	}
 	return points
 }
@@ -163,11 +194,20 @@ func calculateTotalPoints(total float64) int {
 // Calculate points based on items
 func calculateItemPoints(items []Item) int {
 	points := (len(items) / 2) * 5 // 5 points for every two items
+	log.Printf("%d item pairs, added %d points\n", len(items)/2, points)
 	for _, item := range items {
 		trimmedDescription := strings.TrimSpace(item.ShortDescription)
+		itemPrice, err := strconv.ParseFloat(item.Price, 64)
+		if err != nil {
+			log.Printf("Invalid price for item: %s", item.ShortDescription)
+			continue
+		}
 		if len(trimmedDescription)%3 == 0 {
-			itemPrice, _ := strconv.ParseFloat(item.Price, 64)
-			points += int(math.Ceil(itemPrice * 0.2))
+			extraPoints := int(math.Ceil(itemPrice * 0.2))
+			points += extraPoints
+			log.Printf("Item '%s' has description length divisible by 3, added %d points (Item price: %.2f)\n", trimmedDescription, extraPoints, itemPrice)
+		} else {
+			log.Printf("Item '%s' does not have description length divisible by 3, no extra points\n", trimmedDescription)
 		}
 	}
 	return points
@@ -177,11 +217,14 @@ func calculateItemPoints(items []Item) int {
 func calculateOddDatePoints(dateStr string) int {
 	purchaseDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
+		log.Printf("Invalid purchase date: %s", dateStr)
 		return 0
 	}
 	if purchaseDate.Day()%2 != 0 {
+		log.Printf("Purchase date '%s' is an odd day, added 6 points\n", dateStr)
 		return 6
 	}
+	log.Printf("Purchase date '%s' is not an odd day, no points\n", dateStr)
 	return 0
 }
 
@@ -189,10 +232,13 @@ func calculateOddDatePoints(dateStr string) int {
 func calculateTimePoints(timeStr string) int {
 	purchaseTime, err := time.Parse("15:04", timeStr)
 	if err != nil {
+		log.Printf("Invalid purchase time: %s", timeStr)
 		return 0
 	}
 	if purchaseTime.Hour() >= 14 && purchaseTime.Hour() < 16 {
+		log.Printf("Purchase time '%s' is between 2:00 PM and 4:00 PM, added 10 points\n", timeStr)
 		return 10
 	}
+	log.Printf("Purchase time '%s' is not between 2:00 PM and 4:00 PM, no points\n", timeStr)
 	return 0
 }
